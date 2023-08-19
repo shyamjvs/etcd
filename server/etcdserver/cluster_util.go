@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,24 +33,6 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"go.uber.org/zap"
 )
-
-// isMemberBootstrapped tries to check if the given member has been bootstrapped
-// in the given cluster.
-func isMemberBootstrapped(lg *zap.Logger, cl *membership.RaftCluster, member string, rt http.RoundTripper, timeout time.Duration) bool {
-	rcl, err := getClusterFromRemotePeers(lg, getRemotePeerURLs(cl, member), timeout, false, rt)
-	if err != nil {
-		return false
-	}
-	id := cl.MemberByName(member).ID
-	m := rcl.Member(id)
-	if m == nil {
-		return false
-	}
-	if len(m.ClientURLs) > 0 {
-		return true
-	}
-	return false
-}
 
 // GetClusterFromRemotePeers takes a set of URLs representing etcd peers, and
 // attempts to construct a Cluster by accessing the members endpoint on one of
@@ -122,20 +103,6 @@ func getClusterFromRemotePeers(lg *zap.Logger, urls []string, timeout time.Durat
 	return nil, fmt.Errorf("could not retrieve cluster information from the given URLs")
 }
 
-// getRemotePeerURLs returns peer urls of remote members in the cluster. The
-// returned list is sorted in ascending lexicographical order.
-func getRemotePeerURLs(cl *membership.RaftCluster, local string) []string {
-	us := make([]string, 0)
-	for _, m := range cl.Members() {
-		if m.Name == local {
-			continue
-		}
-		us = append(us, m.PeerURLs...)
-	}
-	sort.Strings(us)
-	return us
-}
-
 // getMembersVersions returns the versions of the members in the given cluster.
 // The key of the returned map is the member's ID. The value of the returned map
 // is the semver versions string, including server and cluster.
@@ -177,18 +144,6 @@ func allowedVersionRange(downgradeEnabled bool) (minV *semver.Version, maxV *sem
 		minV = &semver.Version{Major: maxV.Major, Minor: maxV.Minor}
 	}
 	return minV, maxV
-}
-
-// isCompatibleWithCluster return true if the local member has a compatible version with
-// the current running cluster.
-// The version is considered as compatible when at least one of the other members in the cluster has a
-// cluster version in the range of [MinV, MaxV] and no known members has a cluster version
-// out of the range.
-// We set this rule since when the local member joins, another member might be offline.
-func isCompatibleWithCluster(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) bool {
-	vers := getMembersVersions(lg, cl, local, rt, timeout)
-	minV, maxV := allowedVersionRange(getDowngradeEnabledFromRemotePeers(lg, cl, local, rt, timeout))
-	return isCompatibleWithVers(lg, vers, local, minV, maxV)
 }
 
 func isCompatibleWithVers(lg *zap.Logger, vers map[string]*version.Versions, local types.ID, minV, maxV *semver.Version) bool {

@@ -1,4 +1,4 @@
-// Copyright 2015 The etcd Authors
+// Copyright 2023 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdserver
+package raft
 
 import (
 	"expvar"
 	"fmt"
+	"go.etcd.io/etcd/server/v3/etcdserver"
+	"go.etcd.io/etcd/server/v3/etcdserver/consensus"
 	"log"
 	"sync"
 	"time"
@@ -29,20 +31,15 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/logutil"
 	"go.etcd.io/etcd/pkg/v3/contention"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
-	serverstorage "go.etcd.io/etcd/server/v3/storage"
 )
 
 const (
-	// The max throughput of etcd will not exceed 100MB/s (100K * 1KB value).
-	// Assuming the RTT is around 10ms, 1MB max size is large enough.
-	maxSizePerMsg = 1 * 1024 * 1024
-	// Never overflow the rafthttp buffer, which is 4096.
-	// TODO: a better const?
-	maxInflightMsgs = 4096 / 8
+	// max number of in-flight snapshot messages etcdserver allows to have
+	// This number is more than enough for most clusters with 5 machines.
+	maxInFlightMsgSnap = 16
 )
 
 var (
-	// protects raftStatus
 	raftStatusMu sync.Mutex
 	// indirection for expvar func interface
 	// expvar panics when publishing duplicate name
@@ -79,6 +76,9 @@ type toApply struct {
 }
 
 type raftNode struct {
+	raft.Node
+	rafthttp.Transporter
+
 	lg *zap.Logger
 
 	tickMu *sync.Mutex
@@ -100,22 +100,6 @@ type raftNode struct {
 
 	stopped chan struct{}
 	done    chan struct{}
-}
-
-type raftNodeConfig struct {
-	lg *zap.Logger
-
-	// to check if msg receiver is removed from cluster
-	isIDRemoved func(id uint64) bool
-	raft.Node
-	raftStorage *raft.MemoryStorage
-	storage     serverstorage.Storage
-	heartbeat   time.Duration // for logging
-	// transport specifies the transport to send and receive msgs to members.
-	// Sending messages MUST NOT block. It is okay to drop messages, since
-	// clients should timeout and reissue their messages.
-	// If transport is nil, server will panic.
-	transport rafthttp.Transporter
 }
 
 func newRaftNode(cfg raftNodeConfig) *raftNode {
@@ -152,16 +136,19 @@ func newRaftNode(cfg raftNodeConfig) *raftNode {
 	return r
 }
 
-// raft.Node does not have locks in Raft package
-func (r *raftNode) tick() {
+func (r *raftNode) AdvanceTicks(ticks int) {
+	// raft.Node does not have locks in Raft package
 	r.tickMu.Lock()
-	r.Tick()
-	r.tickMu.Unlock()
+	defer r.tickMu.Unlock()
+
+	for i := 0; i < ticks; i++ {
+		r.Tick()
+	}
 }
 
 // start prepares and starts raftNode in a new goroutine. It is no longer safe
 // to modify the fields after it has been started.
-func (r *raftNode) start(rh *raftReadyHandler) {
+func (r *raftNode) start(rh *etcdserver.raftReadyHandler) {
 	internalTimeout := time.Second
 
 	go func() {
@@ -176,21 +163,21 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				if rd.SoftState != nil {
 					newLeader := rd.SoftState.Lead != raft.None && rh.getLead() != rd.SoftState.Lead
 					if newLeader {
-						leaderChanges.Inc()
+						consensus.LeaderChanges.Inc()
 					}
 
 					if rd.SoftState.Lead == raft.None {
-						hasLeader.Set(0)
+						consensus.HasLeader.Set(0)
 					} else {
-						hasLeader.Set(1)
+						consensus.HasLeader.Set(1)
 					}
 
 					rh.updateLead(rd.SoftState.Lead)
 					islead = rd.RaftState == raft.StateLeader
 					if islead {
-						isLeader.Set(1)
+						consensus.IsLeader.Set(1)
 					} else {
-						isLeader.Set(0)
+						consensus.IsLeader.Set(0)
 					}
 					rh.updateLeadership(newLeader)
 					r.td.Reset()
@@ -246,7 +233,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					r.lg.Fatal("failed to save Raft hard state and entries", zap.Error(err))
 				}
 				if !raft.IsEmptyHardState(rd.HardState) {
-					proposalsCommitted.Set(float64(rd.HardState.Commit))
+					consensus.ProposalsCommitted.Set(float64(rd.HardState.Commit))
 				}
 				// gofail: var raftAfterSave struct{}
 
@@ -330,7 +317,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 	}()
 }
 
-func updateCommittedIndex(ap *toApply, rh *raftReadyHandler) {
+func updateCommittedIndex(ap *toApply, rh *etcdserver.raftReadyHandler) {
 	var ci uint64
 	if len(ap.entries) != 0 {
 		ci = ap.entries[len(ap.entries)-1].Index
@@ -381,7 +368,7 @@ func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 					zap.Duration("expected-duration", 2*r.heartbeat),
 					zap.Duration("exceeded-duration", exceed),
 				)
-				heartbeatSendFailures.Inc()
+				consensus.HeartbeatSendFailures.Inc()
 			}
 		}
 	}
@@ -423,14 +410,4 @@ func (r *raftNode) pauseSending() {
 func (r *raftNode) resumeSending() {
 	p := r.transport.(rafthttp.Pausable)
 	p.Resume()
-}
-
-// advanceTicks advances ticks of Raft node.
-// This can be used for fast-forwarding election
-// ticks in multi data-center deployments, thus
-// speeding up election process.
-func (r *raftNode) advanceTicks(ticks int) {
-	for i := 0; i < ticks; i++ {
-		r.tick()
-	}
 }

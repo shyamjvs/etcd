@@ -15,11 +15,12 @@
 // Package version implements etcd version parsing and contains latest version
 // information.
 
-package etcdserver
+package bootstrap
 
 import (
 	"encoding/json"
 	"fmt"
+	"go.etcd.io/etcd/server/v3/etcdserver"
 	"io"
 	"net/http"
 	"os"
@@ -132,7 +133,7 @@ func mockBootstrapRoundTrip(members []etcdserverpb.Member) roundTripFunc {
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(mockVersionJSON())),
 			}, nil
-		case strings.Contains(r.URL.String(), DowngradeEnabledPath):
+		case strings.Contains(r.URL.String(), etcdserver.DowngradeEnabledPath):
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(`true`)),
@@ -196,7 +197,7 @@ func TestBootstrapBackend(t *testing.T) {
 			}
 
 			haveWAL := wal.Exist(cfg.WALDir())
-			st := v2store.New(StoreClusterPrefix, StoreKeysPrefix)
+			st := v2store.New(etcdserver.StoreClusterPrefix, etcdserver.StoreKeysPrefix)
 			ss := snap.New(cfg.Logger, cfg.SnapDir())
 			backend, err := bootstrapBackend(cfg, haveWAL, st, ss)
 

@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
+	"go.etcd.io/etcd/server/v3/etcdserver/bootstrap"
+	raft2 "go.etcd.io/etcd/server/v3/etcdserver/consensus/raft"
 	"math"
 	"math/rand"
 	"net/http"
@@ -93,16 +95,10 @@ const (
 
 	purgeFileInterval = 30 * time.Second
 
-	// max number of in-flight snapshot messages etcdserver allows to have
-	// This number is more than enough for most clusters with 5 machines.
-	maxInFlightMsgSnap = 16
-
 	releaseDelayAfterSnapshot = 30 * time.Second
 
 	// maxPendingRevokes is the maximum number of outstanding expired lease revocations.
 	maxPendingRevokes = 16
-
-	recommendedMaxRequestBytes = 10 * 1024 * 1024
 
 	readyPercent = 0.9
 
@@ -115,8 +111,7 @@ var (
 	// (since it will timeout).
 	monitorVersionInterval = rafthttp.ConnWriteTimeout - time.Second
 
-	recommendedMaxRequestBytesString = humanize.Bytes(uint64(recommendedMaxRequestBytes))
-	storeMemberAttributeRegexp       = regexp.MustCompile(path.Join(membership.StoreMembersPrefix, "[[:xdigit:]]{1,16}", "attributes"))
+	storeMemberAttributeRegexp = regexp.MustCompile(path.Join(membership.StoreMembersPrefix, "[[:xdigit:]]{1,16}", "attributes"))
 )
 
 func init() {
@@ -216,7 +211,7 @@ type EtcdServer struct {
 	lead              uint64 // must use atomic operations to access; keep 64-bit aligned.
 
 	consistIndex cindex.ConsistentIndexer // consistIndex is used to get/set/save consistentIndex
-	r            raftNode                 // uses 64-bit atomics; keep 64-bit aligned.
+	r            raft2.raftNode           // uses 64-bit atomics; keep 64-bit aligned.
 
 	readych chan struct{}
 	Cfg     config.ServerConfig
@@ -304,7 +299,7 @@ type EtcdServer struct {
 // NewServer creates a new EtcdServer from the supplied configuration. The
 // configuration is considered static for the lifetime of the EtcdServer.
 func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
-	b, err := bootstrap(cfg)
+	b, err := bootstrap.bootstrap(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +468,7 @@ func (s *EtcdServer) adjustTicks() {
 			zap.Int("election-ticks", s.Cfg.ElectionTicks),
 			zap.String("election-timeout", tickToDur(s.Cfg.ElectionTicks, s.Cfg.TickMs)),
 		)
-		s.r.advanceTicks(ticks)
+		s.r.AdvanceTicks(ticks)
 		return
 	}
 
@@ -514,7 +509,7 @@ func (s *EtcdServer) adjustTicks() {
 				zap.Int("active-remote-members", peerN),
 			)
 
-			s.r.advanceTicks(ticks)
+			s.r.AdvanceTicks(ticks)
 			return
 		}
 	}
@@ -919,7 +914,7 @@ func (s *EtcdServer) Cleanup() {
 	}
 }
 
-func (s *EtcdServer) applyAll(ep *etcdProgress, apply *toApply) {
+func (s *EtcdServer) applyAll(ep *etcdProgress, apply *raft2.toApply) {
 	s.applySnapshot(ep, apply)
 	s.applyEntries(ep, apply)
 
@@ -941,7 +936,7 @@ func (s *EtcdServer) applyAll(ep *etcdProgress, apply *toApply) {
 	}
 }
 
-func (s *EtcdServer) applySnapshot(ep *etcdProgress, toApply *toApply) {
+func (s *EtcdServer) applySnapshot(ep *etcdProgress, toApply *raft2.toApply) {
 	if raft.IsEmptySnap(toApply.snapshot) {
 		return
 	}
@@ -1112,7 +1107,7 @@ func verifyConsistentIndexIsLatest(lg *zap.Logger, snapshot raftpb.Snapshot, cin
 	})
 }
 
-func (s *EtcdServer) applyEntries(ep *etcdProgress, apply *toApply) {
+func (s *EtcdServer) applyEntries(ep *etcdProgress, apply *raft2.toApply) {
 	if len(apply.entries) == 0 {
 		return
 	}

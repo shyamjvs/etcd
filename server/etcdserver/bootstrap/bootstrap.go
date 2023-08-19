@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdserver
+package bootstrap
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/coreos/go-semver/semver"
+	"github.com/dustin/go-humanize"
+	"go.etcd.io/etcd/server/v3/etcdserver"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
-
-	"github.com/coreos/go-semver/semver"
-	"github.com/dustin/go-humanize"
-	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
@@ -47,8 +47,15 @@ import (
 	"go.etcd.io/etcd/server/v3/storage/schema"
 	"go.etcd.io/etcd/server/v3/storage/wal"
 	"go.etcd.io/etcd/server/v3/storage/wal/walpb"
-	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
+)
+
+const (
+	recommendedMaxRequestBytes = 10 * 1024 * 1024
+)
+
+var (
+	recommendedMaxRequestBytesString = humanize.Bytes(uint64(recommendedMaxRequestBytes))
 )
 
 func bootstrap(cfg config.ServerConfig) (b *bootstrappedServer, err error) {
@@ -76,7 +83,7 @@ func bootstrap(cfg config.ServerConfig) (b *bootstrappedServer, err error) {
 	}
 
 	haveWAL := wal.Exist(cfg.WALDir())
-	st := v2store.New(StoreClusterPrefix, StoreKeysPrefix)
+	st := v2store.New(etcdserver.StoreClusterPrefix, etcdserver.StoreKeysPrefix)
 	backend, err := bootstrapBackend(cfg, haveWAL, st, ss)
 	if err != nil {
 		return nil, err
@@ -106,20 +113,18 @@ func bootstrap(cfg config.ServerConfig) (b *bootstrappedServer, err error) {
 		backend.Close()
 		return nil, err
 	}
-	raft := bootstrapRaft(cfg, cluster, s.wal)
+	//raft := bootstrapRaft(cfg, cluster.cl, s.wal)
 	return &bootstrappedServer{
 		prt:     prt,
 		ss:      ss,
 		storage: s,
 		cluster: cluster,
-		raft:    raft,
 	}, nil
 }
 
 type bootstrappedServer struct {
 	storage *bootstrappedStorage
 	cluster *bootstrapedCluster
-	raft    *bootstrappedRaft
 	prt     http.RoundTripper
 	ss      *snap.Snapshotter
 }
@@ -154,15 +159,6 @@ type bootstrapedCluster struct {
 	remotes []*membership.Member
 	cl      *membership.RaftCluster
 	nodeID  types.ID
-}
-
-type bootstrappedRaft struct {
-	lg        *zap.Logger
-	heartbeat time.Duration
-
-	peers   []raft.Peer
-	config  *raft.Config
-	storage *raft.MemoryStorage
 }
 
 func bootstrapStorage(cfg config.ServerConfig, st v2store.Store, be *bootstrappedBackend, wal *bootstrappedWAL, cl *bootstrapedCluster) (b *bootstrappedStorage, err error) {
@@ -286,7 +282,7 @@ func bootstrapExistingClusterNoWAL(cfg config.ServerConfig, prt http.RoundTrippe
 	if err != nil {
 		return nil, err
 	}
-	existingCluster, gerr := GetClusterFromRemotePeers(cfg.Logger, getRemotePeerURLs(cl, cfg.Name), prt)
+	existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(cfg.Logger, getRemotePeerURLs(cl, cfg.Name), prt)
 	if gerr != nil {
 		return nil, fmt.Errorf("cannot fetch cluster info from peer urls: %v", gerr)
 	}
@@ -465,92 +461,6 @@ func (c *bootstrapedCluster) databaseFileMissing(s *bootstrappedStorage) bool {
 	return v3Cluster && !s.backend.beExist
 }
 
-func bootstrapRaft(cfg config.ServerConfig, cluster *bootstrapedCluster, bwal *bootstrappedWAL) *bootstrappedRaft {
-	switch {
-	case !bwal.haveWAL && !cfg.NewCluster:
-		return bootstrapRaftFromCluster(cfg, cluster.cl, nil, bwal)
-	case !bwal.haveWAL && cfg.NewCluster:
-		return bootstrapRaftFromCluster(cfg, cluster.cl, cluster.cl.MemberIDs(), bwal)
-	case bwal.haveWAL:
-		return bootstrapRaftFromWAL(cfg, bwal)
-	default:
-		cfg.Logger.Panic("unsupported bootstrap config")
-		return nil
-	}
-}
-
-func bootstrapRaftFromCluster(cfg config.ServerConfig, cl *membership.RaftCluster, ids []types.ID, bwal *bootstrappedWAL) *bootstrappedRaft {
-	member := cl.MemberByName(cfg.Name)
-	peers := make([]raft.Peer, len(ids))
-	for i, id := range ids {
-		var ctx []byte
-		ctx, err := json.Marshal((*cl).Member(id))
-		if err != nil {
-			cfg.Logger.Panic("failed to marshal member", zap.Error(err))
-		}
-		peers[i] = raft.Peer{ID: uint64(id), Context: ctx}
-	}
-	cfg.Logger.Info(
-		"starting local member",
-		zap.String("local-member-id", member.ID.String()),
-		zap.String("cluster-id", cl.ID().String()),
-	)
-	s := bwal.MemoryStorage()
-	return &bootstrappedRaft{
-		lg:        cfg.Logger,
-		heartbeat: time.Duration(cfg.TickMs) * time.Millisecond,
-		config:    raftConfig(cfg, uint64(member.ID), s),
-		peers:     peers,
-		storage:   s,
-	}
-}
-
-func bootstrapRaftFromWAL(cfg config.ServerConfig, bwal *bootstrappedWAL) *bootstrappedRaft {
-	s := bwal.MemoryStorage()
-	return &bootstrappedRaft{
-		lg:        cfg.Logger,
-		heartbeat: time.Duration(cfg.TickMs) * time.Millisecond,
-		config:    raftConfig(cfg, uint64(bwal.meta.nodeID), s),
-		storage:   s,
-	}
-}
-
-func raftConfig(cfg config.ServerConfig, id uint64, s *raft.MemoryStorage) *raft.Config {
-	return &raft.Config{
-		ID:              id,
-		ElectionTick:    cfg.ElectionTicks,
-		HeartbeatTick:   1,
-		Storage:         s,
-		MaxSizePerMsg:   maxSizePerMsg,
-		MaxInflightMsgs: maxInflightMsgs,
-		CheckQuorum:     true,
-		PreVote:         cfg.PreVote,
-		Logger:          NewRaftLoggerZap(cfg.Logger.Named("raft")),
-	}
-}
-
-func (b *bootstrappedRaft) newRaftNode(ss *snap.Snapshotter, wal *wal.WAL, cl *membership.RaftCluster) *raftNode {
-	var n raft.Node
-	if len(b.peers) == 0 {
-		n = raft.RestartNode(b.config)
-	} else {
-		n = raft.StartNode(b.config, b.peers)
-	}
-	raftStatusMu.Lock()
-	raftStatus = n.Status
-	raftStatusMu.Unlock()
-	return newRaftNode(
-		raftNodeConfig{
-			lg:          b.lg,
-			isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
-			Node:        n,
-			heartbeat:   b.heartbeat,
-			raftStorage: b.storage,
-			storage:     serverstorage.NewStorage(b.lg, wal, ss),
-		},
-	)
-}
-
 func bootstrapWALFromSnapshot(cfg config.ServerConfig, snapshot *raftpb.Snapshot) *bootstrappedWAL {
 	wal, st, ents, snap, meta := openWALFromSnapshot(cfg, snapshot)
 	bwal := &bootstrappedWAL{
@@ -662,20 +572,6 @@ type bootstrappedWAL struct {
 	meta     *snapshotMetadata
 }
 
-func (wal *bootstrappedWAL) MemoryStorage() *raft.MemoryStorage {
-	s := raft.NewMemoryStorage()
-	if wal.snapshot != nil {
-		s.ApplySnapshot(*wal.snapshot)
-	}
-	if wal.st != nil {
-		s.SetHardState(*wal.st)
-	}
-	if len(wal.ents) != 0 {
-		s.Append(wal.ents)
-	}
-	return s
-}
-
 func (wal *bootstrappedWAL) CommitedEntries() []raftpb.Entry {
 	for i, ent := range wal.ents {
 		if ent.Index > wal.st.Commit {
@@ -710,4 +606,48 @@ func (wal *bootstrappedWAL) AppendAndCommitEntries(ents []raftpb.Entry) {
 	if len(wal.ents) != 0 {
 		wal.st.Commit = wal.ents[len(wal.ents)-1].Index
 	}
+}
+
+// isCompatibleWithCluster return true if the local member has a compatible version with
+// the current running cluster.
+// The version is considered as compatible when at least one of the other members in the cluster has a
+// cluster version in the range of [MinV, MaxV] and no known members has a cluster version
+// out of the range.
+// We set this rule since when the local member joins, another member might be offline.
+func isCompatibleWithCluster(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) bool {
+	vers := getMembersVersions(lg, cl, local, rt, timeout)
+	minV, maxV := allowedVersionRange(getDowngradeEnabledFromRemotePeers(lg, cl, local, rt, timeout))
+	return isCompatibleWithVers(lg, vers, local, minV, maxV)
+}
+
+// getRemotePeerURLs returns peer urls of remote members in the cluster. The
+// returned list is sorted in ascending lexicographical order.
+func getRemotePeerURLs(cl *membership.RaftCluster, local string) []string {
+	us := make([]string, 0)
+	for _, m := range cl.Members() {
+		if m.Name == local {
+			continue
+		}
+		us = append(us, m.PeerURLs...)
+	}
+	sort.Strings(us)
+	return us
+}
+
+// isMemberBootstrapped tries to check if the given member has been bootstrapped
+// in the given cluster.
+func isMemberBootstrapped(lg *zap.Logger, cl *membership.RaftCluster, member string, rt http.RoundTripper, timeout time.Duration) bool {
+	rcl, err := getClusterFromRemotePeers(lg, getRemotePeerURLs(cl, member), timeout, false, rt)
+	if err != nil {
+		return false
+	}
+	id := cl.MemberByName(member).ID
+	m := rcl.Member(id)
+	if m == nil {
+		return false
+	}
+	if len(m.ClientURLs) > 0 {
+		return true
+	}
+	return false
 }
