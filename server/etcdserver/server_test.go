@@ -52,6 +52,8 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
 	apply2 "go.etcd.io/etcd/server/v3/etcdserver/apply"
 	"go.etcd.io/etcd/server/v3/etcdserver/cindex"
+	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
 	"go.etcd.io/etcd/server/v3/lease"
 	"go.etcd.io/etcd/server/v3/mock/mockstorage"
@@ -1644,7 +1646,7 @@ func TestUpdateVersion(t *testing.T) {
 	if r.Method != "PUT" {
 		t.Errorf("method = %s, want PUT", r.Method)
 	}
-	if wpath := path.Join(StoreClusterPrefix, "version"); r.Path != wpath {
+	if wpath := path.Join(constants.StoreClusterPrefix, "version"); r.Path != wpath {
 		t.Errorf("path = %s, want %s", r.Path, wpath)
 	}
 	if r.Val != "2.0.0" {
@@ -1754,7 +1756,7 @@ func TestGetOtherPeerURLs(t *testing.T) {
 	for i, tt := range tests {
 		cl := membership.NewClusterFromMembers(lg, types.ID(0), tt.membs)
 		self := "1"
-		urls := getRemotePeerURLs(cl, self)
+		urls := clusterutil.GetRemotePeerURLs(cl, self)
 		if !reflect.DeepEqual(urls, tt.wurls) {
 			t.Errorf("#%d: urls = %+v, want %+v", i, urls, tt.wurls)
 		}

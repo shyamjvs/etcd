@@ -28,6 +28,7 @@ import (
 	"go.etcd.io/etcd/server/v3/auth"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	apply2 "go.etcd.io/etcd/server/v3/etcdserver/apply"
+	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
 	"go.etcd.io/etcd/server/v3/etcdserver/txn"
 	"go.etcd.io/etcd/server/v3/lease"
@@ -986,7 +987,7 @@ func (s *EtcdServer) Downgrade(ctx context.Context, r *pb.DowngradeRequest) (*pb
 func (s *EtcdServer) downgradeValidate(ctx context.Context, v string) (*pb.DowngradeResponse, error) {
 	resp := &pb.DowngradeResponse{}
 
-	targetVersion, err := convertToClusterVersion(v)
+	targetVersion, err := clusterutil.ConvertToClusterVersion(v)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,7 +1007,7 @@ func (s *EtcdServer) downgradeValidate(ctx context.Context, v string) (*pb.Downg
 
 func (s *EtcdServer) downgradeEnable(ctx context.Context, r *pb.DowngradeRequest) (*pb.DowngradeResponse, error) {
 	lg := s.Logger()
-	targetVersion, err := convertToClusterVersion(r.Version)
+	targetVersion, err := clusterutil.ConvertToClusterVersion(r.Version)
 	if err != nil {
 		lg.Warn("reject downgrade request", zap.Error(err))
 		return nil, err

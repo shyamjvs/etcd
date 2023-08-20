@@ -41,6 +41,8 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3discovery"
 	"go.etcd.io/etcd/server/v3/etcdserver/cindex"
+	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	servererrors "go.etcd.io/etcd/server/v3/etcdserver/errors"
 	serverstorage "go.etcd.io/etcd/server/v3/storage"
 	"go.etcd.io/etcd/server/v3/storage/backend"
@@ -76,7 +78,7 @@ func bootstrap(cfg config.ServerConfig) (b *bootstrappedServer, err error) {
 	}
 
 	haveWAL := wal.Exist(cfg.WALDir())
-	st := v2store.New(StoreClusterPrefix, StoreKeysPrefix)
+	st := v2store.New(constants.StoreClusterPrefix, constants.StoreKeysPrefix)
 	backend, err := bootstrapBackend(cfg, haveWAL, st, ss)
 	if err != nil {
 		return nil, err
@@ -286,14 +288,14 @@ func bootstrapExistingClusterNoWAL(cfg config.ServerConfig, prt http.RoundTrippe
 	if err != nil {
 		return nil, err
 	}
-	existingCluster, gerr := GetClusterFromRemotePeers(cfg.Logger, getRemotePeerURLs(cl, cfg.Name), prt)
+	existingCluster, gerr := clusterutil.GetClusterFromRemotePeers(cfg.Logger, clusterutil.GetRemotePeerURLs(cl, cfg.Name), prt)
 	if gerr != nil {
 		return nil, fmt.Errorf("cannot fetch cluster info from peer urls: %v", gerr)
 	}
 	if err := membership.ValidateClusterAndAssignIDs(cfg.Logger, cl, existingCluster); err != nil {
 		return nil, fmt.Errorf("error validating peerURLs %s: %v", existingCluster, err)
 	}
-	if !isCompatibleWithCluster(cfg.Logger, cl, cl.MemberByName(cfg.Name).ID, prt, cfg.ReqTimeout()) {
+	if !clusterutil.IsCompatibleWithCluster(cfg.Logger, cl, cl.MemberByName(cfg.Name).ID, prt, cfg.ReqTimeout()) {
 		return nil, fmt.Errorf("incompatible with current running cluster")
 	}
 	scaleUpLearners := false
@@ -319,7 +321,7 @@ func bootstrapNewClusterNoWAL(cfg config.ServerConfig, prt http.RoundTripper) (*
 		return nil, err
 	}
 	m := cl.MemberByName(cfg.Name)
-	if isMemberBootstrapped(cfg.Logger, cl, cfg.Name, prt, cfg.BootstrapTimeoutEffective()) {
+	if clusterutil.IsMemberBootstrapped(cfg.Logger, cl, cfg.Name, prt, cfg.BootstrapTimeoutEffective()) {
 		return nil, fmt.Errorf("member %s has already been bootstrapped", m.ID)
 	}
 	if cfg.ShouldDiscover() {

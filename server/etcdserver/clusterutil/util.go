@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdserver
+package clusterutil
 
 import (
 	"context"
@@ -29,16 +29,17 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
 
 	"github.com/coreos/go-semver/semver"
 	"go.uber.org/zap"
 )
 
-// isMemberBootstrapped tries to check if the given member has been bootstrapped
+// IsMemberBootstrapped tries to check if the given member has been bootstrapped
 // in the given cluster.
-func isMemberBootstrapped(lg *zap.Logger, cl *membership.RaftCluster, member string, rt http.RoundTripper, timeout time.Duration) bool {
-	rcl, err := getClusterFromRemotePeers(lg, getRemotePeerURLs(cl, member), timeout, false, rt)
+func IsMemberBootstrapped(lg *zap.Logger, cl *membership.RaftCluster, member string, rt http.RoundTripper, timeout time.Duration) bool {
+	rcl, err := getClusterFromRemotePeers(lg, GetRemotePeerURLs(cl, member), timeout, false, rt)
 	if err != nil {
 		return false
 	}
@@ -122,9 +123,9 @@ func getClusterFromRemotePeers(lg *zap.Logger, urls []string, timeout time.Durat
 	return nil, fmt.Errorf("could not retrieve cluster information from the given URLs")
 }
 
-// getRemotePeerURLs returns peer urls of remote members in the cluster. The
+// GetRemotePeerURLs returns peer urls of remote members in the cluster. The
 // returned list is sorted in ascending lexicographical order.
-func getRemotePeerURLs(cl *membership.RaftCluster, local string) []string {
+func GetRemotePeerURLs(cl *membership.RaftCluster, local string) []string {
 	us := make([]string, 0)
 	for _, m := range cl.Members() {
 		if m.Name == local {
@@ -136,11 +137,11 @@ func getRemotePeerURLs(cl *membership.RaftCluster, local string) []string {
 	return us
 }
 
-// getMembersVersions returns the versions of the members in the given cluster.
+// GetMembersVersions returns the versions of the members in the given cluster.
 // The key of the returned map is the member's ID. The value of the returned map
 // is the semver versions string, including server and cluster.
 // If it fails to get the version of a member, the key will be nil.
-func getMembersVersions(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) map[string]*version.Versions {
+func GetMembersVersions(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) map[string]*version.Versions {
 	members := cl.Members()
 	vers := make(map[string]*version.Versions)
 	for _, m := range members {
@@ -179,14 +180,14 @@ func allowedVersionRange(downgradeEnabled bool) (minV *semver.Version, maxV *sem
 	return minV, maxV
 }
 
-// isCompatibleWithCluster return true if the local member has a compatible version with
+// IsCompatibleWithCluster return true if the local member has a compatible version with
 // the current running cluster.
 // The version is considered as compatible when at least one of the other members in the cluster has a
 // cluster version in the range of [MinV, MaxV] and no known members has a cluster version
 // out of the range.
 // We set this rule since when the local member joins, another member might be offline.
-func isCompatibleWithCluster(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) bool {
-	vers := getMembersVersions(lg, cl, local, rt, timeout)
+func IsCompatibleWithCluster(lg *zap.Logger, cl *membership.RaftCluster, local types.ID, rt http.RoundTripper, timeout time.Duration) bool {
+	vers := GetMembersVersions(lg, cl, local, rt, timeout)
 	minV, maxV := allowedVersionRange(getDowngradeEnabledFromRemotePeers(lg, cl, local, rt, timeout))
 	return isCompatibleWithVers(lg, vers, local, minV, maxV)
 }
@@ -285,7 +286,7 @@ func getVersion(lg *zap.Logger, m *membership.Member, rt http.RoundTripper, time
 	return nil, err
 }
 
-func promoteMemberHTTP(ctx context.Context, url string, id uint64, peerRt http.RoundTripper) ([]*membership.Member, error) {
+func PromoteMemberHTTP(ctx context.Context, url string, id uint64, peerRt http.RoundTripper) ([]*membership.Member, error) {
 	cc := &http.Client{Transport: peerRt}
 	// TODO: refactor member http handler code
 	// cannot import etcdhttp, so manually construct url
@@ -366,7 +367,7 @@ func getDowngradeEnabled(lg *zap.Logger, m *membership.Member, rt http.RoundTrip
 	)
 
 	for _, u := range m.PeerURLs {
-		addr := u + DowngradeEnabledPath
+		addr := u + constants.DowngradeEnabledPath
 		resp, err = cc.Get(addr)
 		if err != nil {
 			lg.Warn(
@@ -404,7 +405,7 @@ func getDowngradeEnabled(lg *zap.Logger, m *membership.Member, rt http.RoundTrip
 	return false, err
 }
 
-func convertToClusterVersion(v string) (*semver.Version, error) {
+func ConvertToClusterVersion(v string) (*semver.Version, error) {
 	ver, err := semver.NewVersion(v)
 	if err != nil {
 		// allow input version format Major.Minor
@@ -420,7 +421,7 @@ func convertToClusterVersion(v string) (*semver.Version, error) {
 
 func GetMembershipInfoInV2Format(lg *zap.Logger, cl *membership.RaftCluster) []byte {
 	var st v2store.Store
-	st = v2store.New(StoreClusterPrefix, StoreKeysPrefix)
+	st = v2store.New(constants.StoreClusterPrefix, constants.StoreKeysPrefix)
 	cl.Store(st)
 	d, err := st.SaveNoCopy()
 	if err != nil {

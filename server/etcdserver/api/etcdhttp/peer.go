@@ -26,6 +26,7 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
 	"go.etcd.io/etcd/server/v3/lease/leasehttp"
 
@@ -67,7 +68,7 @@ func newPeerHandler(
 		mux.Handle(leasehttp.LeaseInternalPrefix, leaseHandler)
 	}
 	if downgradeEnabledHandler != nil {
-		mux.Handle(etcdserver.DowngradeEnabledPath, downgradeEnabledHandler)
+		mux.Handle(constants.DowngradeEnabledPath, downgradeEnabledHandler)
 	}
 	if hashKVHandler != nil {
 		mux.Handle(etcdserver.PeerHashKVPath, hashKVHandler)

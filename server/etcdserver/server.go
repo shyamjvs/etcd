@@ -37,6 +37,8 @@ import (
 	"go.etcd.io/etcd/pkg/v3/runtime"
 	"go.etcd.io/etcd/server/v3/config"
 	"go.etcd.io/etcd/server/v3/etcdserver/apply"
+	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
 
 	"go.etcd.io/raft/v3"
@@ -83,9 +85,6 @@ const (
 	// follower to catch up.
 	DefaultSnapshotCatchUpEntries uint64 = 5000
 
-	StoreClusterPrefix = "/0"
-	StoreKeysPrefix    = "/1"
-
 	// HealthInterval is the minimum time the cluster should be healthy
 	// before accepting add member requests.
 	HealthInterval = 5 * time.Second
@@ -104,8 +103,6 @@ const (
 	recommendedMaxRequestBytes = 10 * 1024 * 1024
 
 	readyPercent = 0.9
-
-	DowngradeEnabledPath = "/downgrade/enabled"
 )
 
 var (
@@ -673,7 +670,7 @@ func (h *downgradeEnabledHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("X-Etcd-Cluster-ID", h.cluster.ID().String())
 
-	if r.URL.Path != DowngradeEnabledPath {
+	if r.URL.Path != constants.DowngradeEnabledPath {
 		http.Error(w, "bad path", http.StatusBadRequest)
 		return
 	}
@@ -1408,7 +1405,7 @@ func (s *EtcdServer) PromoteMember(ctx context.Context, id uint64) ([]*membershi
 			return nil, err
 		}
 		for _, url := range leader.PeerURLs {
-			resp, err := promoteMemberHTTP(cctx, url, id, s.peerRt)
+			resp, err := clusterutil.PromoteMemberHTTP(cctx, url, id, s.peerRt)
 			if err == nil {
 				return resp, nil
 			}

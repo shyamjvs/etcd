@@ -29,10 +29,10 @@ import (
 	"go.uber.org/zap/zaptest"
 
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
-	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/tests/v3/framework/config"
 	"go.etcd.io/etcd/tests/v3/framework/e2e"
 )
@@ -272,7 +272,7 @@ func assertMembershipEqual(t testing.TB, firstStore v2store.Store, secondStore v
 }
 
 func openSnap(data []byte) v2store.Store {
-	st := v2store.New(etcdserver.StoreClusterPrefix, etcdserver.StoreKeysPrefix)
+	st := v2store.New(constants.StoreClusterPrefix, constants.StoreKeysPrefix)
 	st.Recovery(data)
 	return st
 }

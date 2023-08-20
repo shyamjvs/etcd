@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdserver
+package clusterutil
 
 import (
 	"testing"
@@ -123,7 +123,7 @@ func TestConvertToClusterVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ver, err := convertToClusterVersion(tt.inputVerStr)
+			ver, err := ConvertToClusterVersion(tt.inputVerStr)
 			hasError := err != nil
 			if hasError != tt.hasError {
 				t.Errorf("Expected error status is %v; Got %v", tt.hasError, err)
