@@ -19,4 +19,16 @@ const (
 	StoreKeysPrefix    = "/1"
 
 	DowngradeEnabledPath = "/downgrade/enabled"
+
+	RecommendedMaxRequestBytes = 10 * 1024 * 1024
+
+	// RaftMaxSizePerMsg is the max byte size of each append message in raft.
+	// The max throughput of etcd will not exceed 100MB/s (100K * 1KB value).
+	// Assuming the RTT is around 10ms, 1MB max size is large enough.
+	RaftMaxSizePerMsg = 1 * 1024 * 1024
+
+	// RaftMaxInflightMsgs is the max number of in-flight append messages in raft's optimistic replication phase.
+	// Never overflow the rafthttp buffer, which is 4096.
+	// TODO: Can we find a better value?
+	RaftMaxInflightMsgs = 4096 / 8
 )

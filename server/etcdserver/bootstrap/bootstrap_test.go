@@ -15,7 +15,7 @@
 // Package version implements etcd version parsing and contains latest version
 // information.
 
-package etcdserver
+package bootstrap
 
 import (
 	"encoding/json"
@@ -210,8 +210,8 @@ func TestBootstrapBackend(t *testing.T) {
 				t.Fatalf("expected error to contain: %q, got: %q", tt.expectedError.Error(), err.Error())
 			}
 
-			if backend.ci.ConsistentIndex() != tt.expectedConsistentIdx {
-				t.Errorf("expected consistent index: %d, got: %d", tt.expectedConsistentIdx, backend.ci.ConsistentIndex())
+			if backend.Ci.ConsistentIndex() != tt.expectedConsistentIdx {
+				t.Errorf("expected consistent index: %d, got: %d", tt.expectedConsistentIdx, backend.Ci.ConsistentIndex())
 			}
 		})
 	}

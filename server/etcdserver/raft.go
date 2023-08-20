@@ -27,18 +27,14 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 
 	"go.etcd.io/etcd/client/pkg/v3/logutil"
+	"go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/pkg/v3/contention"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
+	"go.etcd.io/etcd/server/v3/etcdserver/bootstrap"
 	serverstorage "go.etcd.io/etcd/server/v3/storage"
-)
-
-const (
-	// The max throughput of etcd will not exceed 100MB/s (100K * 1KB value).
-	// Assuming the RTT is around 10ms, 1MB max size is large enough.
-	maxSizePerMsg = 1 * 1024 * 1024
-	// Never overflow the rafthttp buffer, which is 4096.
-	// TODO: a better const?
-	maxInflightMsgs = 4096 / 8
+	"go.etcd.io/etcd/server/v3/storage/wal"
 )
 
 var (
@@ -118,14 +114,34 @@ type raftNodeConfig struct {
 	transport rafthttp.Transporter
 }
 
+func NewRaftNode(b *bootstrap.BootstrappedRaft, ss *snap.Snapshotter, wal *wal.WAL, cl *membership.RaftCluster) *raftNode {
+	var n raft.Node
+	if len(b.Peers) == 0 {
+		n = raft.RestartNode(b.Config)
+	} else {
+		n = raft.StartNode(b.Config, b.Peers)
+	}
+	raftStatusMu.Lock()
+	raftStatus = n.Status
+	raftStatusMu.Unlock()
+	return newRaftNode(raftNodeConfig{
+		lg:          b.Logger,
+		isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
+		Node:        n,
+		heartbeat:   b.Heartbeat,
+		raftStorage: b.Storage,
+		storage:     serverstorage.NewStorage(b.Logger, wal, ss),
+	})
+}
+
 func newRaftNode(cfg raftNodeConfig) *raftNode {
 	var lg raft.Logger
 	if cfg.lg != nil {
-		lg = NewRaftLoggerZap(cfg.lg)
+		lg = bootstrap.NewRaftLoggerZap(cfg.lg)
 	} else {
 		lcfg := logutil.DefaultZapLoggerConfig
 		var err error
-		lg, err = NewRaftLogger(&lcfg)
+		lg, err = bootstrap.NewRaftLogger(&lcfg)
 		if err != nil {
 			log.Fatalf("cannot create raft logger %v", err)
 		}

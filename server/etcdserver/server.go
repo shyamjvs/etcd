@@ -37,6 +37,7 @@ import (
 	"go.etcd.io/etcd/pkg/v3/runtime"
 	"go.etcd.io/etcd/server/v3/config"
 	"go.etcd.io/etcd/server/v3/etcdserver/apply"
+	"go.etcd.io/etcd/server/v3/etcdserver/bootstrap"
 	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
 	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/etcdserver/errors"
@@ -100,8 +101,6 @@ const (
 	// maxPendingRevokes is the maximum number of outstanding expired lease revocations.
 	maxPendingRevokes = 16
 
-	recommendedMaxRequestBytes = 10 * 1024 * 1024
-
 	readyPercent = 0.9
 )
 
@@ -111,8 +110,7 @@ var (
 	// (since it will timeout).
 	monitorVersionInterval = rafthttp.ConnWriteTimeout - time.Second
 
-	recommendedMaxRequestBytesString = humanize.Bytes(uint64(recommendedMaxRequestBytes))
-	storeMemberAttributeRegexp       = regexp.MustCompile(path.Join(membership.StoreMembersPrefix, "[[:xdigit:]]{1,16}", "attributes"))
+	storeMemberAttributeRegexp = regexp.MustCompile(path.Join(membership.StoreMembersPrefix, "[[:xdigit:]]{1,16}", "attributes"))
 )
 
 func init() {
@@ -298,7 +296,7 @@ type EtcdServer struct {
 // NewServer creates a new EtcdServer from the supplied configuration. The
 // configuration is considered static for the lifetime of the EtcdServer.
 func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
-	b, err := bootstrap(cfg)
+	b, err := bootstrap.BootstrapServer(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +307,8 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		}
 	}()
 
-	sstats := stats.NewServerStats(cfg.Name, b.cluster.cl.String())
-	lstats := stats.NewLeaderStats(cfg.Logger, b.cluster.nodeID.String())
+	sstats := stats.NewServerStats(cfg.Name, b.Cluster.Cl.String())
+	lstats := stats.NewLeaderStats(cfg.Logger, b.Cluster.NodeID.String())
 
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
 	srv = &EtcdServer{
@@ -319,28 +317,28 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		lgMu:                  new(sync.RWMutex),
 		lg:                    cfg.Logger,
 		errorc:                make(chan error, 1),
-		v2store:               b.storage.st,
-		snapshotter:           b.ss,
-		r:                     *b.raft.newRaftNode(b.ss, b.storage.wal.w, b.cluster.cl),
-		memberId:              b.cluster.nodeID,
+		v2store:               b.Storage.St,
+		snapshotter:           b.Ss,
+		r:                     *NewRaftNode(b.Raft, b.Ss, b.Storage.Wal.W, b.Cluster.Cl),
+		memberId:              b.Cluster.NodeID,
 		attributes:            membership.Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
-		cluster:               b.cluster.cl,
+		cluster:               b.Cluster.Cl,
 		stats:                 sstats,
 		lstats:                lstats,
 		SyncTicker:            time.NewTicker(500 * time.Millisecond),
-		peerRt:                b.prt,
-		reqIDGen:              idutil.NewGenerator(uint16(b.cluster.nodeID), time.Now()),
+		peerRt:                b.Prt,
+		reqIDGen:              idutil.NewGenerator(uint16(b.Cluster.NodeID), time.Now()),
 		AccessController:      &AccessController{CORS: cfg.CORS, HostWhitelist: cfg.HostWhitelist},
-		consistIndex:          b.storage.backend.ci,
+		consistIndex:          b.Storage.Backend.Ci,
 		firstCommitInTerm:     notify.NewNotifier(),
 		clusterVersionChanged: notify.NewNotifier(),
 	}
-	serverID.With(prometheus.Labels{"server_id": b.cluster.nodeID.String()}).Set(1)
+	serverID.With(prometheus.Labels{"server_id": b.Cluster.NodeID.String()}).Set(1)
 	srv.cluster.SetVersionChangedNotifier(srv.clusterVersionChanged)
 	srv.applyV2 = NewApplierV2(cfg.Logger, srv.v2store, srv.cluster)
 
-	srv.be = b.storage.backend.be
-	srv.beHooks = b.storage.backend.beHooks
+	srv.be = b.Storage.Backend.Be
+	srv.beHooks = b.Storage.Backend.BeHooks
 	minTTL := time.Duration((3*cfg.ElectionTicks)/2) * heartbeat
 
 	// always recover lessor before kv. When we recover the mvcc.KV it will reattach keys to its leases.
@@ -409,11 +407,11 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		Logger:      cfg.Logger,
 		TLSInfo:     cfg.PeerTLSInfo,
 		DialTimeout: cfg.PeerDialTimeout(),
-		ID:          b.cluster.nodeID,
+		ID:          b.Cluster.NodeID,
 		URLs:        cfg.PeerURLs,
-		ClusterID:   b.cluster.cl.ID(),
+		ClusterID:   b.Cluster.Cl.ID(),
 		Raft:        srv,
-		Snapshotter: b.ss,
+		Snapshotter: b.Ss,
 		ServerStats: sstats,
 		LeaderStats: lstats,
 		ErrorC:      srv.errorc,
@@ -422,13 +420,13 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		return nil, err
 	}
 	// add all remotes into transport
-	for _, m := range b.cluster.remotes {
-		if m.ID != b.cluster.nodeID {
+	for _, m := range b.Cluster.Remotes {
+		if m.ID != b.Cluster.NodeID {
 			tr.AddRemote(m.ID, m.PeerURLs)
 		}
 	}
-	for _, m := range b.cluster.cl.Members() {
-		if m.ID != b.cluster.nodeID {
+	for _, m := range b.Cluster.Cl.Members() {
+		if m.ID != b.Cluster.NodeID {
 			tr.AddPeer(m.ID, m.PeerURLs)
 		}
 	}

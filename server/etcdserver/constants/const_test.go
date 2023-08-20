@@ -24,4 +24,7 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "/0", StoreClusterPrefix)
 	assert.Equal(t, "/1", StoreKeysPrefix)
 	assert.Equal(t, "/downgrade/enabled", DowngradeEnabledPath)
+	assert.Equal(t, 10*1024*1024, RecommendedMaxRequestBytes)
+	assert.Equal(t, 1*1024*1024, RaftMaxSizePerMsg)
+	assert.Equal(t, 4096/8, RaftMaxInflightMsgs)
 }
