@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdserver
+package raftnode
 
 import (
 	"encoding/json"
 	"expvar"
+	"go.etcd.io/etcd/server/v3/etcdserver"
 	"reflect"
 	"sync"
 	"testing"
@@ -159,15 +160,15 @@ func TestCreateConfigChangeEnts(t *testing.T) {
 }
 
 func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
-	n := newNopReadyNode()
+	n := etcdserver.newNopReadyNode()
 	r := newRaftNode(raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        n,
 		storage:     mockstorage.NewStorageRecorder(""),
 		raftStorage: raft.NewMemoryStorage(),
-		transport:   newNopTransporter(),
+		transport:   etcdserver.newNopTransporter(),
 	})
-	srv := &EtcdServer{lgMu: new(sync.RWMutex), lg: zaptest.NewLogger(t), r: *r}
+	srv := &etcdserver.EtcdServer{lgMu: new(sync.RWMutex), lg: zaptest.NewLogger(t), r: *r}
 	srv.r.start(nil)
 	n.readyc <- raft.Ready{}
 
@@ -192,18 +193,18 @@ func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 
 // TestConfigChangeBlocksApply ensures toApply blocks if committed entries contain config-change.
 func TestConfigChangeBlocksApply(t *testing.T) {
-	n := newNopReadyNode()
+	n := etcdserver.newNopReadyNode()
 
 	r := newRaftNode(raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        n,
 		storage:     mockstorage.NewStorageRecorder(""),
 		raftStorage: raft.NewMemoryStorage(),
-		transport:   newNopTransporter(),
+		transport:   etcdserver.newNopTransporter(),
 	})
-	srv := &EtcdServer{lgMu: new(sync.RWMutex), lg: zaptest.NewLogger(t), r: *r}
+	srv := &etcdserver.EtcdServer{lgMu: new(sync.RWMutex), lg: zaptest.NewLogger(t), r: *r}
 
-	srv.r.start(&raftReadyHandler{
+	srv.r.start(&etcdserver.raftReadyHandler{
 		getLead:          func() uint64 { return 0 },
 		updateLead:       func(uint64) {},
 		updateLeadership: func(bool) {},
@@ -245,12 +246,12 @@ func TestConfigChangeBlocksApply(t *testing.T) {
 }
 
 func TestProcessDuplicatedAppRespMessage(t *testing.T) {
-	n := newNopReadyNode()
+	n := etcdserver.newNopReadyNode()
 	cl := membership.NewCluster(zaptest.NewLogger(t))
 
 	rs := raft.NewMemoryStorage()
 	p := mockstorage.NewStorageRecorder("")
-	tr, sendc := newSendMsgAppRespTransporter()
+	tr, sendc := etcdserver.newSendMsgAppRespTransporter()
 	r := newRaftNode(raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
@@ -260,7 +261,7 @@ func TestProcessDuplicatedAppRespMessage(t *testing.T) {
 		raftStorage: rs,
 	})
 
-	s := &EtcdServer{
+	s := &etcdserver.EtcdServer{
 		lgMu:       new(sync.RWMutex),
 		lg:         zaptest.NewLogger(t),
 		r:          *r,
@@ -299,15 +300,15 @@ func TestExpvarWithNoRaftStatus(t *testing.T) {
 }
 
 func TestStopRaftNodeMoreThanOnce(t *testing.T) {
-	n := newNopReadyNode()
+	n := etcdserver.newNopReadyNode()
 	r := newRaftNode(raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        n,
 		storage:     mockstorage.NewStorageRecorder(""),
 		raftStorage: raft.NewMemoryStorage(),
-		transport:   newNopTransporter(),
+		transport:   etcdserver.newNopTransporter(),
 	})
-	r.start(&raftReadyHandler{})
+	r.start(&etcdserver.raftReadyHandler{})
 
 	for i := 0; i < 2; i++ {
 		stopped := make(chan struct{})

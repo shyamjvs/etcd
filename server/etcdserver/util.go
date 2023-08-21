@@ -16,38 +16,38 @@ package etcdserver
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/server/v3/etcdserver/consensus"
 	"time"
 
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
 )
 
 // isConnectedToQuorumSince checks whether the local member is connected to the
 // quorum of the cluster since the given time.
-func isConnectedToQuorumSince(transport rafthttp.Transporter, since time.Time, self types.ID, members []*membership.Member) bool {
-	return numConnectedSince(transport, since, self, members) >= (len(members)/2)+1
+func isConnectedToQuorumSince(r consensus.Node, since time.Time, self types.ID, members []*membership.Member) bool {
+	return numConnectedSince(r, since, self, members) >= (len(members)/2)+1
 }
 
 // isConnectedSince checks whether the local member is connected to the
 // remote member since the given time.
-func isConnectedSince(transport rafthttp.Transporter, since time.Time, remote types.ID) bool {
-	t := transport.ActiveSince(remote)
+func isConnectedSince(r consensus.Node, since time.Time, remote types.ID) bool {
+	t := r.ActiveSince(remote)
 	return !t.IsZero() && t.Before(since)
 }
 
 // isConnectedFullySince checks whether the local member is connected to all
 // members in the cluster since the given time.
-func isConnectedFullySince(transport rafthttp.Transporter, since time.Time, self types.ID, members []*membership.Member) bool {
-	return numConnectedSince(transport, since, self, members) == len(members)
+func isConnectedFullySince(r consensus.Node, since time.Time, self types.ID, members []*membership.Member) bool {
+	return numConnectedSince(r, since, self, members) == len(members)
 }
 
 // numConnectedSince counts how many members are connected to the local member
 // since the given time.
-func numConnectedSince(transport rafthttp.Transporter, since time.Time, self types.ID, members []*membership.Member) int {
+func numConnectedSince(r consensus.Node, since time.Time, self types.ID, members []*membership.Member) int {
 	connectedNum := 0
 	for _, m := range members {
-		if m.ID == self || isConnectedSince(transport, since, m.ID) {
+		if m.ID == self || isConnectedSince(r, since, m.ID) {
 			connectedNum++
 		}
 	}
@@ -56,11 +56,11 @@ func numConnectedSince(transport rafthttp.Transporter, since time.Time, self typ
 
 // longestConnected chooses the member with longest active-since-time.
 // It returns false, if nothing is active.
-func longestConnected(tp rafthttp.Transporter, membs []types.ID) (types.ID, bool) {
+func longestConnected(r consensus.Node, membs []types.ID) (types.ID, bool) {
 	var longest types.ID
 	var oldest time.Time
 	for _, id := range membs {
-		tm := tp.ActiveSince(id)
+		tm := r.ActiveSince(id)
 		if tm.IsZero() { // inactive
 			continue
 		}

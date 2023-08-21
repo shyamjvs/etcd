@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.etcd.io/etcd/server/v3/etcdserver/consensus/raftnode"
 	"math"
 	"net/http"
 	"os"
@@ -192,7 +193,7 @@ func TestApplyRepeat(t *testing.T) {
 	st := v2store.New()
 	cl.SetStore(v2store.New())
 	cl.AddMember(&membership.Member{ID: 1234}, true)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        n,
 		raftStorage: raft.NewMemoryStorage(),
@@ -583,7 +584,7 @@ func TestApplyConfChangeError(t *testing.T) {
 		srv := &EtcdServer{
 			lgMu:    new(sync.RWMutex),
 			lg:      zaptest.NewLogger(t),
-			r:       *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
+			r:       *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
 			cluster: cl,
 		}
 		_, err := srv.applyConfChange(tt.cc, nil, true)
@@ -609,7 +610,7 @@ func TestApplyConfChangeShouldStop(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		cl.AddMember(&membership.Member{ID: types.ID(i)}, true)
 	}
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:        zaptest.NewLogger(t),
 		Node:      newNodeNop(),
 		transport: newNopTransporter(),
@@ -709,7 +710,7 @@ func TestApplyConfigChangeUpdatesConsistIndex(t *testing.T) {
 	assert.Equal(t, consistIndex, rindex)
 }
 
-func realisticRaftNode(lg *zap.Logger) *raftNode {
+func realisticRaftNode(lg *zap.Logger) *raftnode.raftNode {
 	storage := raft.NewMemoryStorage()
 	storage.SetHardState(raftpb.HardState{Commit: 0, Term: 0})
 	c := &raft.Config{
@@ -721,7 +722,7 @@ func realisticRaftNode(lg *zap.Logger) *raftNode {
 		MaxInflightMsgs: 256,
 	}
 	n := raft.RestartNode(c)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:        lg,
 		Node:      n,
 		transport: newNopTransporter(),
@@ -738,7 +739,7 @@ func TestApplyMultiConfChangeShouldStop(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		cl.AddMember(&membership.Member{ID: types.ID(i)}, true)
 	}
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:        lg,
 		Node:      newNodeNop(),
 		transport: newNopTransporter(),
@@ -785,7 +786,7 @@ func TestDoProposal(t *testing.T) {
 	}
 	for i, tt := range tests {
 		st := mockstore.NewRecorder()
-		r := newRaftNode(raftNodeConfig{
+		r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 			lg:          zaptest.NewLogger(t),
 			Node:        newNodeCommitter(),
 			storage:     mockstorage.NewStorageRecorder(""),
@@ -828,7 +829,7 @@ func TestDoProposalCancelled(t *testing.T) {
 		lgMu:     new(sync.RWMutex),
 		lg:       zaptest.NewLogger(t),
 		Cfg:      config.ServerConfig{Logger: zaptest.NewLogger(t), TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries},
-		r:        *newRaftNode(raftNodeConfig{Node: newNodeNop()}),
+		r:        *raftnode.newRaftNode(raftnode.raftNodeConfig{Node: newNodeNop()}),
 		w:        wt,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
@@ -852,7 +853,7 @@ func TestDoProposalTimeout(t *testing.T) {
 		lgMu:     new(sync.RWMutex),
 		lg:       zaptest.NewLogger(t),
 		Cfg:      config.ServerConfig{Logger: zaptest.NewLogger(t), TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries},
-		r:        *newRaftNode(raftNodeConfig{Node: newNodeNop()}),
+		r:        *raftnode.newRaftNode(raftnode.raftNodeConfig{Node: newNodeNop()}),
 		w:        mockwait.NewNop(),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
@@ -871,7 +872,7 @@ func TestDoProposalStopped(t *testing.T) {
 		lgMu:     new(sync.RWMutex),
 		lg:       zaptest.NewLogger(t),
 		Cfg:      config.ServerConfig{Logger: zaptest.NewLogger(t), TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries},
-		r:        *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: newNodeNop()}),
+		r:        *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: newNodeNop()}),
 		w:        mockwait.NewNop(),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
@@ -892,7 +893,7 @@ func TestSync(t *testing.T) {
 	srv := &EtcdServer{
 		lgMu:     new(sync.RWMutex),
 		lg:       zaptest.NewLogger(t),
-		r:        *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
+		r:        *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 		ctx:      ctx,
 		cancel:   cancel,
@@ -937,7 +938,7 @@ func TestSyncTimeout(t *testing.T) {
 	srv := &EtcdServer{
 		lgMu:     new(sync.RWMutex),
 		lg:       zaptest.NewLogger(t),
-		r:        *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
+		r:        *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 		ctx:      ctx,
 		cancel:   cancel,
@@ -970,7 +971,7 @@ func TestSyncTrigger(t *testing.T) {
 	n := newReadyNode()
 	st := make(chan time.Time, 1)
 	tk := &time.Ticker{C: st}
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        n,
 		raftStorage: raft.NewMemoryStorage(),
@@ -1033,7 +1034,7 @@ func TestSnapshot(t *testing.T) {
 	s.Append([]raftpb.Entry{{Index: 1}})
 	st := mockstore.NewRecorderStream()
 	p := mockstorage.NewStorageRecorderStream("")
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        newNodeNop(),
 		raftStorage: s,
@@ -1112,7 +1113,7 @@ func TestSnapshotOrdering(t *testing.T) {
 	rs := raft.NewMemoryStorage()
 	p := mockstorage.NewStorageRecorderStream(testdir)
 	tr, snapDoneC := newSnapTransporter(lg, snapdir)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          lg,
 		isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
 		Node:        n,
@@ -1191,7 +1192,7 @@ func TestTriggerSnap(t *testing.T) {
 	snapc := 10
 	st := mockstore.NewRecorder()
 	p := mockstorage.NewStorageRecorderStream("")
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          zaptest.NewLogger(t),
 		Node:        newNodeCommitter(),
 		raftStorage: raft.NewMemoryStorage(),
@@ -1266,7 +1267,7 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 
 	rs := raft.NewMemoryStorage()
 	tr, snapDoneC := newSnapTransporter(lg, testdir)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          lg,
 		isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
 		Node:        n,
@@ -1355,7 +1356,7 @@ func TestAddMember(t *testing.T) {
 	cl := newTestCluster(t, nil)
 	st := v2store.New()
 	cl.SetStore(st)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          lg,
 		Node:        n,
 		raftStorage: raft.NewMemoryStorage(),
@@ -1402,7 +1403,7 @@ func TestRemoveMember(t *testing.T) {
 	st := v2store.New()
 	cl.SetStore(v2store.New())
 	cl.AddMember(&membership.Member{ID: 1234}, true)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          lg,
 		Node:        n,
 		raftStorage: raft.NewMemoryStorage(),
@@ -1448,7 +1449,7 @@ func TestUpdateMember(t *testing.T) {
 	st := v2store.New()
 	cl.SetStore(st)
 	cl.AddMember(&membership.Member{ID: 1234}, true)
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:          lg,
 		Node:        n,
 		raftStorage: raft.NewMemoryStorage(),
@@ -1501,7 +1502,7 @@ func TestPublishV3(t *testing.T) {
 		readych:    make(chan struct{}),
 		Cfg:        config.ServerConfig{Logger: lg, TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries, MaxRequestBytes: 1000},
 		memberId:   1,
-		r:          *newRaftNode(raftNodeConfig{lg: lg, Node: n}),
+		r:          *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: lg, Node: n}),
 		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}},
 		cluster:    &membership.RaftCluster{},
 		w:          w,
@@ -1533,7 +1534,7 @@ func TestPublishV3(t *testing.T) {
 // TestPublishV3Stopped tests that publish will be stopped if server is stopped.
 func TestPublishV3Stopped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := newRaftNode(raftNodeConfig{
+	r := raftnode.newRaftNode(raftnode.raftNodeConfig{
 		lg:        zaptest.NewLogger(t),
 		Node:      newNodeNop(),
 		transport: newNopTransporter(),
@@ -1571,7 +1572,7 @@ func TestPublishV3Retry(t *testing.T) {
 		readych:    make(chan struct{}),
 		Cfg:        config.ServerConfig{Logger: lg, TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries, MaxRequestBytes: 1000},
 		memberId:   1,
-		r:          *newRaftNode(raftNodeConfig{lg: lg, Node: n}),
+		r:          *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: lg, Node: n}),
 		w:          mockwait.NewNop(),
 		stopping:   make(chan struct{}),
 		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}},
@@ -1619,7 +1620,7 @@ func TestUpdateVersion(t *testing.T) {
 		lg:         zaptest.NewLogger(t),
 		memberId:   1,
 		Cfg:        config.ServerConfig{Logger: zaptest.NewLogger(t), TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries},
-		r:          *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
+		r:          *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
 		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://node1.com"}},
 		cluster:    &membership.RaftCluster{},
 		w:          w,
@@ -1668,7 +1669,7 @@ func TestUpdateVersionV3(t *testing.T) {
 		lg:         zaptest.NewLogger(t),
 		memberId:   1,
 		Cfg:        config.ServerConfig{Logger: lg, TickMs: 1, SnapshotCatchUpEntries: DefaultSnapshotCatchUpEntries, MaxRequestBytes: 1000},
-		r:          *newRaftNode(raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
+		r:          *raftnode.newRaftNode(raftnode.raftNodeConfig{lg: zaptest.NewLogger(t), Node: n}),
 		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://node1.com"}},
 		cluster:    &membership.RaftCluster{},
 		w:          w,

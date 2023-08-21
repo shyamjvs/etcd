@@ -27,4 +27,5 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, 10*1024*1024, RecommendedMaxRequestBytes)
 	assert.Equal(t, 1*1024*1024, RaftMaxSizePerMsg)
 	assert.Equal(t, 4096/8, RaftMaxInflightMsgs)
+	assert.Equal(t, 16, RaftMaxInflightSnapshotMsgs)
 }

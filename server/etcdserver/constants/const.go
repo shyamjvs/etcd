@@ -31,4 +31,8 @@ const (
 	// Never overflow the rafthttp buffer, which is 4096.
 	// TODO: Can we find a better value?
 	RaftMaxInflightMsgs = 4096 / 8
+
+	// RaftMaxInflightSnapshotMsgs is the max number of in-flight snapshot messages raftNode allows to have.
+	// This number is more than enough for most clusters with 5 machines.
+	RaftMaxInflightSnapshotMsgs = 16
 )
