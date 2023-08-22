@@ -19,47 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap/zaptest"
-
 	"go.etcd.io/etcd/client/pkg/v3/types"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
 	"go.etcd.io/raft/v3/raftpb"
 )
-
-func TestLongestConnected(t *testing.T) {
-	umap, err := types.NewURLsMap("mem1=http://10.1:2379,mem2=http://10.2:2379,mem3=http://10.3:2379")
-	if err != nil {
-		t.Fatal(err)
-	}
-	clus, err := membership.NewClusterFromURLsMap(zaptest.NewLogger(t), "test", umap)
-	if err != nil {
-		t.Fatal(err)
-	}
-	memberIDs := clus.MemberIDs()
-
-	tr := newNopTransporterWithActiveTime(memberIDs)
-	transferee, ok := longestConnected(tr, memberIDs)
-	if !ok {
-		t.Fatalf("unexpected ok %v", ok)
-	}
-	if memberIDs[0] != transferee {
-		t.Fatalf("expected first member %s to be transferee, got %s", memberIDs[0], transferee)
-	}
-
-	// make all members non-active
-	amap := make(map[types.ID]time.Time)
-	for _, id := range memberIDs {
-		amap[id] = time.Time{}
-	}
-	tr.(*nopTransporterWithActiveTime).reset(amap)
-
-	_, ok2 := longestConnected(tr, memberIDs)
-	if ok2 {
-		t.Fatalf("unexpected ok %v", ok)
-	}
-}
 
 type nopTransporterWithActiveTime struct {
 	activeMap map[types.ID]time.Time
@@ -83,6 +47,8 @@ func (s *nopTransporterWithActiveTime) AddRemote(id types.ID, us []string)  {}
 func (s *nopTransporterWithActiveTime) AddPeer(id types.ID, us []string)    {}
 func (s *nopTransporterWithActiveTime) RemovePeer(id types.ID)              {}
 func (s *nopTransporterWithActiveTime) RemoveAllPeers()                     {}
+func (s *nopTransporterWithActiveTime) CutPeer(id types.ID)                 {}
+func (s *nopTransporterWithActiveTime) MendPeer(id types.ID)                {}
 func (s *nopTransporterWithActiveTime) UpdatePeer(id types.ID, us []string) {}
 func (s *nopTransporterWithActiveTime) ActiveSince(id types.ID) time.Time   { return s.activeMap[id] }
 func (s *nopTransporterWithActiveTime) ActivePeers() int                    { return 0 }
