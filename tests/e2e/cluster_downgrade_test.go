@@ -31,10 +31,10 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
+	"go.etcd.io/etcd/server/v3/etcdserver/constants"
 	"go.etcd.io/etcd/server/v3/storage/datadir"
 	"go.etcd.io/etcd/tests/v3/framework/config"
 	"go.etcd.io/etcd/tests/v3/framework/e2e"
@@ -302,7 +302,7 @@ func verifySnapshotMembers(t *testing.T, epc *e2e.EtcdProcessCluster, expectedMe
 		t.Logf("Verifying snapshot for member %d", i)
 		ss := snap.New(epc.Cfg.Logger, datadir.ToSnapDir(epc.Procs[i].Config().DataDirPath))
 		snap, err := ss.Load()
-		st := v2store.New(etcdserver.StoreClusterPrefix, etcdserver.StoreKeysPrefix)
+		st := v2store.New(constants.StoreClusterPrefix, constants.StoreKeysPrefix)
 		err = st.Recovery(snap.Data)
 		assert.NoError(t, err)
 		for _, m := range expectedMembers.Members {

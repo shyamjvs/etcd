@@ -28,9 +28,9 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/pkg/v3/idutil"
 	"go.etcd.io/etcd/pkg/v3/pbutil"
-	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
+	"go.etcd.io/etcd/server/v3/etcdserver/clusterutil"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 	"go.etcd.io/etcd/server/v3/storage/datadir"
 	"go.etcd.io/etcd/server/v3/storage/schema"
@@ -179,7 +179,7 @@ func saveSnap(lg *zap.Logger, destSnap, srcSnap string, desired *desiredCluster)
 func mustTranslateV2store(lg *zap.Logger, desired *desiredCluster) []byte {
 	raftCluster := membership.NewClusterFromMembers(lg, desired.clusterId, desired.members)
 	raftCluster.SetID(desired.nodeId, desired.clusterId)
-	d := etcdserver.GetMembershipInfoInV2Format(lg, raftCluster)
+	d := clusterutil.GetMembershipInfoInV2Format(lg, raftCluster)
 	return d
 }
 

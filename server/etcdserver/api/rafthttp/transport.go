@@ -77,6 +77,10 @@ type Transporter interface {
 	// It is the caller's responsibility to ensure the urls are all valid,
 	// or it panics.
 	UpdatePeer(id types.ID, urls []string)
+	// CutPeer drops messages to the specified peer.
+	CutPeer(id types.ID)
+	// MendPeer recovers the message dropping behavior of the given peer.
+	MendPeer(id types.ID)
 	// ActiveSince returns the time that the connection with the peer
 	// of the given id becomes active.
 	// If the connection is active since peer was added, it returns the adding time.
@@ -229,7 +233,6 @@ func (t *Transport) Stop() {
 	t.remotes = nil
 }
 
-// CutPeer drops messages to the specified peer.
 func (t *Transport) CutPeer(id types.ID) {
 	t.mu.RLock()
 	p, pok := t.peers[id]
@@ -244,7 +247,6 @@ func (t *Transport) CutPeer(id types.ID) {
 	}
 }
 
-// MendPeer recovers the message dropping behavior of the given peer.
 func (t *Transport) MendPeer(id types.ID) {
 	t.mu.RLock()
 	p, pok := t.peers[id]
